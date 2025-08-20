@@ -6,47 +6,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
+  deploy:
     runs-on: ubuntu-latest
-    # don't block downstream jobs even if ruff finds issues
-    continue-on-error: true
+
     steps:
       - uses: actions/checkout@v4
-      - name: Ruff (don't fail the build)
+
+      # Optional: keep lint but don't block deploy while you're finishing
+      - name: Ruff (lint) but don't fail build
         uses: chartboost/ruff-action@v1
         with:
-          # fix what it can, ignore long lines, but ALWAYS exit 0
-          args: 'check . --select=E,F,I --ignore=E501 --fix --exit-zero'
+          args: --fix .
+        continue-on-error: true
 
-
-  build:
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build docker images (sanity)
-        run: |
-          docker build -t rag-backend ./backend
-          docker build -t rag-frontend ./frontend
-
-  deploy-ssh:
-    needs: [build]   # or whatever job you lint/build in
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-  
-      - name: Deploy via SSH
-      - uses: appleboy/ssh-action@v1.2.0
+      - name: Deploy over SSH to EC2
+        uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          port: 22
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            cd ~/rag-homework || git clone https://github.com/${{ github.repository }} ~/rag-homework && cd ~/rag-homework
+            # clone once if missing, otherwise update
+            if [ ! -d /root/rag-homework/.git ]; then
+              git clone https://github.com/${{ github.repository }} /root/rag-homework
+            fi
+            cd /root/rag-homework
             git fetch --all
             git reset --hard origin/main
-            docker compose pull
+
+            # keep your existing .env on EC2 (already working)
+            # then (re)build & start
             docker compose up -d --build
+
+            # show status
             docker ps
