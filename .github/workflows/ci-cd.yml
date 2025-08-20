@@ -30,33 +30,23 @@ jobs:
           docker build -t rag-frontend ./frontend
 
   deploy-ssh:
+    needs: [build]   # or whatever job you lint/build in
     runs-on: ubuntu-latest
-    needs: build
     steps:
-      - name: Add EC2 host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Deploy on EC2 via SSH
-        uses: appleboy/ssh-action@v1.2.0
+      - uses: actions/checkout@v4
+  
+      - name: Deploy via SSH
+      - uses: appleboy/ssh-action@v1.2.0
         with:
-          host:     ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key:      ${{ secrets.EC2_SSH_KEY }}
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
           script: |
             set -e
-            # clone once, then reuse
-            test -d ~/rag-homework || git clone https://github.com/${{ github.repository }} ~/rag-homework
-            cd ~/rag-homework
-            git fetch origin main
+            cd ~/rag-homework || git clone https://github.com/${{ github.repository }} ~/rag-homework && cd ~/rag-homework
+            git fetch --all
             git reset --hard origin/main
-
-            # ensure your runtime .env exists (one-time copy if you keep it outside git)
-            # test -f .env || echo "WARNING: .env is missing"
-
-            docker compose pull --ignore-pull-failures || true
-            docker compose down || true
+            docker compose pull
             docker compose up -d --build
-
-            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+            docker ps
