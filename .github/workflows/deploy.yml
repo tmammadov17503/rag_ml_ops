@@ -1,0 +1,16 @@
+name: Deploy
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-to-ec2:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build & start services
+        run: |
+          docker compose pull || true
+          docker compose build -q
+          docker compose up -d
