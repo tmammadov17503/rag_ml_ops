@@ -1,0 +1,12 @@
+Project: RAG Homework
+Contents of the knowledge base:
+- What the project is (FastAPI backend + Streamlit frontend).
+- How to run locally (uvicorn on :8000, Streamlit on :8501).
+- Where the data lives (data/ folder) and retrieval via FAISS.
+- How to rebuild the index (delete faiss.index and faiss_meta.json, then first query rebuilds).
+- Example queries: "Summarize what the knowledge base contains", "How do I run it?", "Where is the data?"
+
+Endpoints:
+- GET /health
+- POST /embed
+- POST /chat/stream (SSE streaming)

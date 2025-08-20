@@ -1,19 +1,24 @@
-import os, json, glob
+import glob
+import json
+import os
 from pathlib import Path
 from typing import List, Tuple
-import numpy as np
+
 import faiss
+import numpy as np
 
-# Our Bedrock embedding helper
-from bedrock_client import embed_texts
+# Relative import so it works when backend/ is a package
+from .bedrock_client import embed_texts
 
-DATA_DIR   = "/app/data"
-INDEX_PATH = os.environ.get("FAISS_INDEX_PATH", "/app/faiss.index")
-META_PATH  = os.environ.get("FAISS_META_PATH", "/app/faiss_meta.json")
+# Paths that work in Codespaces (overridable via env)
+ROOT = Path(__file__).resolve().parents[1]
+DATA_DIR = os.environ.get("DATA_DIR", str(ROOT / "data"))
+INDEX_PATH = os.environ.get("FAISS_INDEX_PATH", str(ROOT / "faiss.index"))
+META_PATH = os.environ.get("FAISS_META_PATH", str(ROOT / "faiss_meta.json"))
 
 
 def _read_corpus(data_dir: str) -> List[str]:
-    """Read plain-text files from DATA_DIR. Include top-level and recursive files."""
+    """Read plain-text files from DATA_DIR (top-level and recursive)."""
     patterns = [
         os.path.join(data_dir, "*.txt"),
         os.path.join(data_dir, "*.md"),
@@ -31,53 +36,71 @@ def _read_corpus(data_dir: str) -> List[str]:
                 if txt:
                     texts.append(txt)
         except Exception:
-            # Keep robust for odd files/encodings
             pass
     return texts
 
 
-class SimpleFAISS:
+def _hash_embed(texts: List[str], dim: int = 256) -> np.ndarray:
     """
-    Tiny wrapper that:
-      - loads existing FAISS index if present
-      - else reads DATA_DIR, embeds, builds, and persists an index
+    Deterministic local fallback so the demo works without Bedrock.
     """
-    def __init__(self):
-        self.texts: List[str] = []
-        self.dim: int = 0
-        self.index: faiss.Index = None  # type: ignore
-        self._load_or_build()
+    out = np.zeros((len(texts), dim), dtype="float32")
+    for i, t in enumerate(texts):
+        seed = abs(hash(t)) % (2**32)
+        rng = np.random.default_rng(seed)
+        out[i] = rng.standard_normal(dim).astype("float32")
+    norms = np.linalg.norm(out, axis=1, keepdims=True) + 1e-8
+    out /= norms
+    return out
 
-    def _load_or_build(self):
-        """Load cached index+meta if present, else build from /app/data."""
-        if Path(INDEX_PATH).exists() and Path(META_PATH).exists():
-            self._load_index()
-            return
 
-        # Build from scratch
-        self.texts = _read_corpus(DATA_DIR)
-        if not self.texts:
-            # Build an empty index with a default dim (we'll learn it on first embed)
-            # But to keep search working, we set a dummy 1024 dim and empty texts.
-            self.dim = 1024
-            self.index = faiss.IndexFlatIP(self.dim)
-            return
-
-        # Embed all texts; infer dim
-        vecs = embed_texts(self.texts)  # -> List[List[float]] or np.ndarray
+def _safe_embed_texts(texts: List[str], expect_dim: int | None = None) -> np.ndarray:
+    """
+    Try Bedrock; if it fails or dims mismatch, use local hashing.
+    """
+    try:
+        vecs = embed_texts(texts)
         if not isinstance(vecs, np.ndarray):
             vecs = np.array(vecs, dtype="float32")
         else:
             vecs = vecs.astype("float32", copy=False)
-
         if vecs.ndim != 2:
             raise RuntimeError(f"Expected 2D embeddings, got shape {vecs.shape}")
+        if expect_dim is not None and vecs.shape[1] != expect_dim:
+            raise RuntimeError("dim mismatch")
+        return vecs
+    except Exception:
+        dim = expect_dim or 256
+        return _hash_embed(texts, dim)
 
+
+class SimpleFAISS:
+    """
+    Loads cached FAISS index if present; otherwise builds from DATA_DIR.
+    """
+
+    def __init__(self):
+        self.texts: List[str] = []
+        self.dim: int = 0
+        self.index: faiss.Index | None = None
+        self._load_or_build()
+
+    def _load_or_build(self):
+        if Path(INDEX_PATH).exists() and Path(META_PATH).exists():
+            self._load_index()
+            return
+
+        self.texts = _read_corpus(DATA_DIR)
+        if not self.texts:
+            self.dim = 256
+            self.index = faiss.IndexFlatIP(self.dim)
+            return
+
+        vecs = _safe_embed_texts(self.texts)
         self.dim = vecs.shape[1]
         self.index = faiss.IndexFlatIP(self.dim)
         self.index.add(vecs)
 
-        # Persist
         faiss.write_index(self.index, INDEX_PATH)
         with open(META_PATH, "w", encoding="utf-8") as f:
             json.dump({"dim": self.dim, "texts": self.texts}, f)
@@ -88,37 +111,22 @@ class SimpleFAISS:
             meta = json.load(f)
         self.dim = int(meta["dim"])
         self.texts = list(meta["texts"])
-        # Sanity: index dim must match meta
         assert self.index.d == self.dim, f"FAISS dim {self.index.d} != meta dim {self.dim}"
 
     def search(self, query: str, k: int = 4) -> List[Tuple[str, float]]:
-        if self.index is None:
+        if self.index is None or not self.texts or self.index.ntotal == 0:
             return []
-        # If we had no data at build time, still handle queries gracefully
-        if not self.texts or self.index.ntotal == 0:
-            return []
-
-        qv = embed_texts([query])
-        if not isinstance(qv, np.ndarray):
-            qv = np.array(qv, dtype="float32")
-        else:
-            qv = qv.astype("float32", copy=False)
-
-        if qv.ndim != 2:
-            raise RuntimeError(f"Expected 2D query embedding, got shape {qv.shape}")
-        if qv.shape[1] != self.index.d:
-            raise AssertionError(f"Query dim {qv.shape[1]} != index dim {self.index.d}")
-
-        D, I = self.index.search(qv, k)
+        qv = _safe_embed_texts([query], expect_dim=self.index.d)
+        D, idxs = self.index.search(qv, k)
         hits: List[Tuple[str, float]] = []
-        for idx, score in zip(I[0], D[0]):
-            if idx < 0 or idx >= len(self.texts):
-                continue
-            hits.append((self.texts[idx], float(score)))
+        for idx, score in zip(J[0], D[0]):
+            if 0 <= idx < len(self.texts):
+                hits.append((self.texts[idx], float(score)))
         return hits
 
 
 _STORE: SimpleFAISS | None = None
+
 
 def get_store() -> SimpleFAISS:
     global _STORE

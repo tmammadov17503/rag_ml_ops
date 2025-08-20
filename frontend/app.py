@@ -1,8 +1,10 @@
 import os
+
 import requests
 import streamlit as st
 
 st.set_page_config(page_title="RAG Chatbot", page_icon="🤖", layout="wide")
+
 
 def _backend_url() -> str:
     # Try secrets if present, otherwise env var, then default
@@ -11,19 +13,26 @@ def _backend_url() -> str:
     except Exception:
         return os.environ.get("BACKEND_URL", "http://backend:8000")
 
+
 BACKEND = _backend_url()
 
-def stream_chat(messages, use_rag=True, k=4):
-    """Consume the backend SSE stream, yield only 'data:' lines (the text)."""
+
+def stream_chat(messages, use_rag=True, k=3):
     url = f"{BACKEND}/chat/stream"
     payload = {"messages": messages, "use_rag": use_rag, "k": k}
     with requests.post(url, json=payload, stream=True, timeout=300) as r:
-        r.raise_for_status()
-        for raw in r.iter_lines(decode_unicode=True):
+        for raw in r.iter_lines():
             if not raw:
                 continue
-            if raw.startswith("data:"):
-                yield raw[len("data:"):].lstrip()
+            line = raw.decode("utf-8")  # keep as-is (no .strip())
+            if line.startswith("data:"):
+                # Keep the model’s leading spaces in the token!
+                # SSE line format is "data: <chunk>". We only drop the one space after "data:".
+                chunk = line[len("data:") :]
+                if chunk.startswith(" "):
+                    chunk = chunk[1:]
+                yield chunk
+
 
 st.title("RAG Chatbot")
 

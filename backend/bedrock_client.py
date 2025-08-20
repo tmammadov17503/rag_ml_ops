@@ -13,13 +13,12 @@ Env vars used:
 
 from __future__ import annotations
 
-import os
 import json
-from typing import Iterable, List, Dict, Any, Generator, Union
+import os
+from typing import Any, Dict, Generator, Iterable, List, Union
 
 import boto3
 import numpy as np
-
 
 # ---------- Configuration ----------
 
@@ -47,6 +46,7 @@ _bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
 
 # ---------- Embeddings ----------
 
+
 def _embed_one(text: str, model_id: str, dim: int) -> List[float]:
     """
     Embed *one* string with Titan v2. Returns a Python list of floats.
@@ -71,9 +71,9 @@ def _embed_one(text: str, model_id: str, dim: int) -> List[float]:
     return emb
 
 
-def embed_texts(texts: Iterable[str],
-                model_id: str | None = None,
-                dim: int | None = None) -> np.ndarray:
+def embed_texts(
+    texts: Iterable[str], model_id: str | None = None, dim: int | None = None
+) -> np.ndarray:
     """
     Embed a list/iterable of strings with Titan v2.
     Returns an np.ndarray of shape (N, D) and dtype float32.
@@ -99,6 +99,7 @@ def embed_texts(texts: Iterable[str],
 
 
 # ---------- Streaming Chat (Claude Messages on Bedrock) ----------
+
 
 def _to_content_blocks(content: Union[str, List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
     """
@@ -143,8 +144,7 @@ def stream_chat_from_bedrock(
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": int(max_tokens),
         "messages": [
-            {"role": m["role"], "content": _to_content_blocks(m["content"])}
-            for m in messages
+            {"role": m["role"], "content": _to_content_blocks(m["content"])} for m in messages
         ],
     }
     if system:
