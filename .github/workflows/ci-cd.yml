@@ -1,38 +1,57 @@
-name: ci-cd
+name: CI/CD
 
 on:
   push:
     branches: [ main ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
-  build-and-lint:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - name: Install linters
-        run: pip install black isort ruff
-      - name: Lint
-        run: |
-          black --check .
-          isort --check-only .
-          ruff .
+      - uses: chartboost/ruff-action@v1
+        with:
+          args: "check ."
 
-      - name: Build Docker images
-        run: |
-          docker build -t rag-homework-backend ./backend
-          docker build -t rag-homework-frontend ./frontend
-
-  deploy:
-    needs: build-and-lint
-    runs-on: self-hosted
+  build:
+    runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v4
-      - name: Write .env from repo secret
-        if: ${{ secrets.DOTENV != '' }}
+      - name: Build docker images (sanity)
         run: |
-          echo "${{ secrets.DOTENV }}" > .env
-      - name: Compose up
-        run: docker compose up -d --build
+          docker build -t rag-backend ./backend
+          docker build -t rag-frontend ./frontend
+
+  deploy-ssh:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Add EC2 host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on EC2 via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -e
+            # clone once, then reuse
+            test -d ~/rag-homework || git clone https://github.com/${{ github.repository }} ~/rag-homework
+            cd ~/rag-homework
+            git fetch origin main
+            git reset --hard origin/main
+
+            # ensure your runtime .env exists (one-time copy if you keep it outside git)
+            # test -f .env || echo "WARNING: .env is missing"
+
+            docker compose pull --ignore-pull-failures || true
+            docker compose down || true
+            docker compose up -d --build
+
+            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
