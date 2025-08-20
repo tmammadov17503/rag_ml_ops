@@ -1,18 +1,19 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-.venv/
+# secrets
 .env
-# Streamlit
-.streamlit/secrets.toml
-# FAISS cache
+backend/.env
+frontend/.env
+**/.streamlit/secrets.toml
+
+# caches & python junk
+**/__pycache__/
+**/*.pyc
+
+# local FAISS artifacts
 faiss.index
 faiss_meta.json
-# Docker
+
+# docker cruft
 *.log
-# OS/editor
-.DS_Store
-Thumbs.db
+
+# knowledge base (uncomment if you DON'T want to commit local data)
+# data/*
