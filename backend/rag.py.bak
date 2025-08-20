@@ -1,0 +1,82 @@
+import os, glob, json
+from typing import List, Tuple
+from pathlib import Path
+
+import numpy as np
+import faiss
+
+from .bedrock_client import embed_texts
+
+# >>> Use the bind-mounted folder with your docs
+DATA_DIR  = "/app/data"
+INDEX_PATH = str(Path(__file__).resolve().parent / "faiss.index")
+META_PATH  = str(Path(__file__).resolve().parent / "faiss_meta.json")
+
+class SimpleFAISS:
+    def __init__(self):
+        self.index: faiss.IndexFlatIP | None = None
+        self.texts: List[str] = []
+        self._dim: int | None = None
+
+    def _embed(self, chunks: List[str]) -> np.ndarray:
+        vecs = embed_texts(chunks)
+        arr = np.array(vecs, dtype="float32")
+        faiss.normalize_L2(arr)  # cosine via inner product
+        return arr
+
+    def build_or_load(self):
+        if os.path.exists(INDEX_PATH) and os.path.exists(META_PATH):
+            self.index = faiss.read_index(INDEX_PATH)
+            with open(META_PATH, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            self.texts = meta["texts"]
+            self._dim = meta["dim"]
+            return
+
+        docs: List[str] = []
+        for path in glob.glob(os.path.join(DATA_DIR, "**", "*.*"), recursive=True):
+            if path.lower().endswith((".txt", ".md")):
+                try:
+                    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                except Exception:
+                    continue
+                for i in range(0, len(content), 1000):
+                    chunk = content[i:i+1000].strip()
+                    if chunk:
+                        docs.append(chunk)
+
+        if not docs:
+            self._dim = 256
+            self.index = faiss.IndexFlatIP(self._dim)
+            self.texts = []
+            return
+
+        embs = self._embed(docs)
+        self._dim = embs.shape[1]
+        self.index = faiss.IndexFlatIP(self._dim)
+        self.index.add(embs)
+        self.texts = docs
+
+        faiss.write_index(self.index, INDEX_PATH)
+        with open(META_PATH, "w", encoding="utf-8") as f:
+            json.dump({"texts": self.texts, "dim": self._dim}, f)
+
+    def search(self, query: str, k: int = 4) -> List[Tuple[str, float]]:
+        if self.index is None or self._dim is None:
+            self.build_or_load()
+        qv = self._embed([query])
+        D, I = self.index.search(qv, k)
+        hits: List[Tuple[str, float]] = []
+        for idx, score in zip(I[0], D[0]):
+            if 0 <= idx < len(self.texts):
+                hits.append((self.texts[idx], float(score)))
+        return hits
+
+_store: SimpleFAISS | None = None
+def get_store() -> SimpleFAISS:
+    global _store
+    if _store is None:
+        _store = SimpleFAISS()
+        _store.build_or_load()
+    return _store

@@ -1,0 +1,23 @@
+services:
+  backend:
+    build: ./backend
+    container_name: rag_backend
+    env_file: ./.env
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+    networks: [ragnet]
+
+  frontend:
+    build: ./frontend
+    container_name: rag_frontend
+    env_file: ./.env
+    depends_on: [backend]
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    networks: [ragnet]
+
+networks:
+  ragnet:
+    driver: bridge

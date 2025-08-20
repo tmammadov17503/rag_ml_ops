@@ -1,0 +1,117 @@
+import os, json, glob
+from pathlib import Path
+from typing import List, Tuple
+import numpy as np
+import faiss
+
+# Our Bedrock embedding helper
+from .bedrock_client import embed_texts
+
+DATA_DIR   = "/app/data" 
+INDEX_PATH = os.environ.get("FAISS_INDEX_PATH", "/app/faiss.index")
+META_PATH  = os.environ.get("FAISS_META_PATH", "/app/faiss_meta.json")
+
+
+def _read_corpus(data_dir: str) -> List[str]:
+    """Read plain-text files from DATA_DIR. Include top-level and recursive files."""
+    patterns = [
+        os.path.join(data_dir, "*.txt"),
+        os.path.join(data_dir, "*.md"),
+        os.path.join(data_dir, "**", "*.txt"),
+        os.path.join(data_dir, "**", "*.md"),
+    ]
+    files = []
+    for p in patterns:
+  
+
+
+
+class SimpleFAISS:
+    """
+    Tiny wrapper that:
+      - loads existing FAISS index if present
+      - else reads DATA_DIR, embeds, builds, and persists an index
+    """
+    def __init__(self):
+        self.texts: List[str] = []
+        self.dim: int = 0
+        self.index: faiss.Index = None  # type: ignore
+        self._load_or_build()
+
+    def _load_or_build(self):
+        """Load cached index+meta if present, else build from /app/data."""
+        if Path(INDEX_PATH).exists() and Path(META_PATH).exists():
+            self._load_index()
+            return
+
+        # Build from scratch
+        self.texts = _read_corpus(DATA_DIR)
+        if not self.texts:
+            # Build an empty index with a default dim (we'll learn it on first embed)
+            # But to keep search working, we set a dummy 1024 dim and empty texts.
+            self.dim = 1024
+            self.index = faiss.IndexFlatIP(self.dim)
+            return
+
+        # Embed all texts; infer dim
+        vecs = embed_texts(self.texts)  # -> List[List[float]] or np.ndarray
+        if not isinstance(vecs, np.ndarray):
+            vecs = np.array(vecs, dtype="float32")
+        else:
+            vecs = vecs.astype("float32", copy=False)
+
+        if vecs.ndim != 2:
+            raise RuntimeError(f"Expected 2D embeddings, got shape {vecs.shape}")
+
+        self.dim = vecs.shape[1]
+        self.index = faiss.IndexFlatIP(self.dim)
+        self.index.add(vecs)
+
+        # Persist
+        faiss.write_index(self.index, INDEX_PATH)
+        with open(META_PATH, "w", encoding="utf-8") as f:
+            json.dump({"dim": self.dim, "texts": self.texts}, f)
+
+    def _load_index(self):
+        self.index = faiss.read_index(INDEX_PATH)
+        with open(META_PATH, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        self.dim = int(meta["dim"])
+        self.texts = list(meta["texts"])
+        # Sanity: index dim must match meta
+        assert self.index.d == self.dim, f"FAISS dim {self.index.d} != meta dim {self.dim}"
+
+    def search(self, query: str, k: int = 4) -> List[Tuple[str, float]]:
+        if self.index is None:
+            return []
+        # If we had no data at build time, still handle queries gracefully
+        if not self.texts or self.index.ntotal == 0:
+            return []
+
+        qv = embed_texts([query])
+        if not isinstance(qv, np.ndarray):
+            qv = np.array(qv, dtype="float32")
+        else:
+            qv = qv.astype("float32", copy=False)
+
+        if qv.ndim != 2:
+            raise RuntimeError(f"Expected 2D query embedding, got shape {qv.shape}")
+        if qv.shape[1] != self.index.d:
+            raise AssertionError(f"Query dim {qv.shape[1]} != index dim {self.index.d}")
+
+        D, I = self.index.search(qv, k)
+        hits: List[Tuple[str, float]] = []
+        for idx, score in zip(I[0], D[0]):
+            if idx < 0 or idx >= len(self.texts):
+                continue
+            hits.append((self.texts[idx], float(score)))
+        return hits
+
+
+_STORE: SimpleFAISS | None = None
+
+def get_store() -> SimpleFAISS:
+    global _STORE
+    if _STORE is None:
+        _STORE = SimpleFAISS()
+    return _STORE

@@ -1,0 +1,6 @@
+Project “RAG Homework”
+- Purpose: a tiny RAG demo using FAISS + Bedrock (Claude for chat, Titan for embeddings).
+- Data location: /app/data inside the backend container.
+- Sample contents include this guide and sample.txt.
+- To run: docker compose up -d; frontend on :8501, backend on :8000.
+- FAQ: This guide is only a demo document for testing retrieval.

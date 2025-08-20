@@ -1,0 +1,38 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install linters
+        run: pip install black isort ruff
+      - name: Lint
+        run: |
+          black --check .
+          isort --check-only .
+          ruff .
+
+      - name: Build Docker images
+        run: |
+          docker build -t rag-homework-backend ./backend
+          docker build -t rag-homework-frontend ./frontend
+
+  deploy:
+    needs: build-and-lint
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write .env from repo secret
+        if: ${{ secrets.DOTENV != '' }}
+        run: |
+          echo "${{ secrets.DOTENV }}" > .env
+      - name: Compose up
+        run: docker compose up -d --build
