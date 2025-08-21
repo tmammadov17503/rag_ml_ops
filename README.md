@@ -29,6 +29,36 @@ A tiny **Retrieval-Augmented Generation (RAG)** chatbot.
 
 ## How to start in EC2
 
+```bash
+# 0) Install Docker if needed 
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+
+# 1) Clone the repo
+git clone https://github.com/<your-username>/rag_ml_ops.git
+cd rag_ml_ops
+
+# 2) Create .env if you want live Bedrock calls
+# echo 'AWS_ACCESS_KEY_ID=...'    >> .env
+# echo 'AWS_SECRET_ACCESS_KEY=...'>> .env
+# echo 'AWS_DEFAULT_REGION=us-east-1' >> .env
+
+# 3) Start both services
+docker compose up -d --build
+
+# 4) Check containers
+docker ps
+
+# 5) Health checks (on the EC2 host)
+curl http://localhost:8000/health
+# has to give -> {"status":"ok"}
+
+# 6) Open in browser
+# Backend (Swagger): http://<EC2-PUBLIC-IP>:8000/docs
+# Frontend (Streamlit): http://<EC2-PUBLIC-IP>:8501
+# Backend (Health): http://<EC2-PUBLIC-IP>:8000/health
+```
+
 Backend Swagger
 
 ![](screenshots/Screenshot%202025-08-20%20234359.png)
