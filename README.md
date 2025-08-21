@@ -59,6 +59,117 @@ curl http://localhost:8000/health
 # Backend (Health): http://<EC2-PUBLIC-IP>:8000/health
 ```
 
+Start/Restart/Logs
+```bash
+# Stop
+docker compose down
+
+# Re-start 
+docker compose up -d
+
+# Follow logs
+docker logs -f rag_backend
+docker logs -f rag_frontend
+```
+
+## Another Option to run without Docker
+You will need two terminals for backend and frontend
+
+Clone repository
+```bash
+git clone https://github.com/<your-username>/rag_ml_ops.git
+cd rag_ml_ops
+```
+
+Terminal 1
+```bash
+cd rag_ml_ops
+pip install -r backend/requirements.txt
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# for Swagger: http://localhost:8000/docs
+```
+
+Terminal 2
+```bash
+cd rag_ml_ops
+mkdir -p frontend/.streamlit
+printf 'BACKEND_URL = "http://localhost:8000"\n' > frontend/.streamlit/secrets.toml
+
+pip install -r frontend/requirements.txt
+streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
+# for frontend UI: http://localhost:8501
+```
+
+## You can also run it in GitHub Codespaces
+We will need 3 terminals for backend, frontend, and health check
+
+Terminal 1
+```bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+Terminal 2
+```bash
+mkdir -p frontend/.streamlit
+printf 'BACKEND_URL = "http://localhost:8000"\n' > frontend/.streamlit/secrets.toml
+streamlit run frontend/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+Terminal 3
+```bash
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/embed -H "Content-Type: application/json" -d '{"texts":["hello world"]}'
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Summarize what the knowledge base contains."}],"use_rag":true,"k":3}'
+```
+
+## Knowledge Base (RAG) — Add/Update Content
+
+Docker:
+```bash
+# has to be inside of the container
+docker exec rag_backend sh -lc 'rm -f /app/faiss.index /app/faiss_meta.json'
+docker restart rag_backend
+```
+
+Local dev / Codespaces:
+```bash
+# has to be in repo root
+rm -f faiss.index faiss_meta.json
+# restart backend or send first query to trigger rebuild
+```
+
+Quick test:
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Summarize what the knowledge base contains."}],"use_rag":true,"k":3}'
+```
+
+## Some Health & Debug Commands
+
+```bash
+# Backend health
+curl http://localhost:8000/health
+
+# Embeddings sanity
+curl -s -X POST http://localhost:8000/embed -H "Content-Type: application/json" -d '{"texts":["hello world"]}'
+
+# RAG streaming (SSE)
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Summarize what the knowledge base contains."}],"use_rag":true,"k":3}'
+```
+
+However, if you are running with Docker and the frontend can’t reach backend, test service DNS from inside the frontend:
+```bash
+docker exec -it rag_frontend sh -lc "apt-get update >/dev/null 2>&1 || apk update >/dev/null 2>&1; \
+  (apt-get install -y curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null 2>&1); \
+  curl -sS http://backend:8000/health"
+# should print {"status":"ok"}
+```
+
 Backend Swagger
 
 ![](screenshots/Screenshot%202025-08-21%20113721.png)
@@ -70,6 +181,7 @@ Backed Health Check
 EC2 Images Check 
 
 ![](screenshots/Screenshot%202025-08-21%20105011.png)
+
 
 ## Details
 
