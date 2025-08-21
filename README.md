@@ -27,6 +27,20 @@ A tiny **Retrieval-Augmented Generation (RAG)** chatbot.
 ├── pyproject.toml # ruff/black/isort config
 └── README.md
 
+## How to start in EC2
+
+Backend Swagger
+
+![](screenshots/Screenshot%202025-08-20%20234359.png)
+
+Backed Health Check
+
+![](screenshots/Screenshot%202025-08-20%20234359.png)
+
+Frontend 
+
+![](screenshots/Screenshot%202025-08-20%20234359.png)
+
 ## Details
 
 > Works on your machine **or** in **GitHub Codespaces** (recommended for the class).  
