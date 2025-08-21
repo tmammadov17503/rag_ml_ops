@@ -61,15 +61,15 @@ curl http://localhost:8000/health
 
 Backend Swagger
 
-![](screenshots/Screenshot%202025-08-20%20234359.png)
+![](screenshots/Screenshot%202025-08-21%20113721.png)
 
 Backed Health Check
 
-![](screenshots/Screenshot%202025-08-20%20234359.png)
+![](screenshots/Screenshot%202025-08-21%20113731.png)
 
-Frontend 
+EC2 Images Check 
 
-![](screenshots/Screenshot%202025-08-20%20234359.png)
+![](screenshots/Screenshot%202025-08-21%20105011.png)
 
 ## Details
 
